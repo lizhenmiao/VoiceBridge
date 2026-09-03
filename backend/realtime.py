@@ -30,7 +30,6 @@ from config import (
     REALTIME_IN_RATE,
     REALTIME_MODEL,
     REALTIME_OUT_RATE,
-    TTS_VOICE,
     VOICE_API_BASE_URL,
     VOICE_API_KEY,
 )
@@ -45,21 +44,18 @@ def _upstream_url() -> str:
 
 
 def _session_update() -> str:
+    # voice 不下发：网关使用自有音色命名（如 xai_ara），OpenAI 音色名不被识别
+    # turn_detection 关闭 server_vad：实测上游 VAD 自动回复路径会导致连接被关闭，
+    # 改由浏览器端做静音检测，说完后由前端发送 commit + response.create（已验证可用）
     return json.dumps({
         "type": "session.update",
         "session": {
             "modalities": ["text", "audio"],
             "instructions": chat_service.system_prompt,
-            "voice": TTS_VOICE,
             "input_audio_format": "pcm16",
             "output_audio_format": "pcm16",
             "input_audio_transcription": {"model": "grok-stt"},
-            "turn_detection": {
-                "type": "server_vad",
-                "threshold": 0.5,
-                "prefix_padding_ms": 300,
-                "silence_duration_ms": 500,
-            },
+            "turn_detection": None,
         },
     }, ensure_ascii=False)
 
@@ -121,6 +117,8 @@ async def realtime_proxy(browser_ws: WebSocket) -> None:
         logger.warning("session.update 发送失败：%s", exc)
 
     # 4) 双向泵
+    upstream_closed = asyncio.Event()
+
     async def browser_to_upstream():
         while True:
             msg = await browser_ws.receive()
@@ -136,6 +134,17 @@ async def realtime_proxy(browser_ws: WebSocket) -> None:
                 await upstream.send(json.dumps(event))
 
     async def upstream_to_browser():
+        """上游 → 浏览器转发，并修补网关的已知缺陷：
+
+        网关的 server_vad「识别完成 → 自动应答」路径存在缺陷（转写完成后
+        直接关闭连接、不出回复音频）。因此这里把上游的 server_vad 当作
+        纯检测器使用：speech_started/stopped 原样转发给前端做状态展示，
+        当检测到"一轮语音结束"后，由代理主动补发 commit + response.create
+        走已验证可用的手动应答路径。
+        """
+        speech_active = False
+        last_speech_ts = 0.0
+
         async for raw in upstream:
             text = raw if isinstance(raw, str) else raw.decode("utf-8", "replace")
             try:
@@ -145,11 +154,30 @@ async def realtime_proxy(browser_ws: WebSocket) -> None:
                 continue
             etype = event.get("type", "")
             delta = event.get("delta")
-            # 音频增量（response.audio.delta / response.output_audio.delta 等）
-            # 解码成二进制 PCM 帧给浏览器播放；字幕类 delta 仍按 JSON 转发
+
+            # 音频增量 → 解码为二进制 PCM 帧给浏览器
             if isinstance(delta, str) and delta and "audio" in etype and "transcript" not in etype:
                 await browser_ws.send_bytes(base64.b64decode(delta))
                 continue
+
+            # 记录语音起止时刻
+            if etype == "input_audio_buffer.speech_started":
+                speech_active = True
+                last_speech_ts = asyncio.get_event_loop().time()
+            elif etype == "input_audio_buffer.speech_stopped":
+                speech_active = False
+                last_speech_ts = asyncio.get_event_loop().time()
+
+            # 转写完成 = 这句话在上游已经收完了，立即补 commit + create
+            # （网关此时会关连接，必须抢在它之前）
+            if etype == "conversation.item.input_audio_transcription.completed":
+                try:
+                    await upstream.send(json.dumps({"type": "input_audio_buffer.commit"}))
+                    await upstream.send(json.dumps({"type": "response.create"}))
+                    logger.info("已为 VAD 语音补发 commit + response.create")
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("补发应答失败：%s", exc)
+
             await browser_ws.send_text(json.dumps(event, ensure_ascii=False))
 
     browser_task = asyncio.create_task(browser_to_upstream())

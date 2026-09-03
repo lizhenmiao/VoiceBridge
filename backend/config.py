@@ -40,7 +40,7 @@ LLM_MODEL = os.getenv("LLM_MODEL", "grok-chat-fast")  # 按网关实际可用模
 # ---- 实时通话（OpenAI Realtime 兼容 WebSocket 代理）----
 # 复用 VOICE_API_BASE_URL / VOICE_API_KEY；REALTIME_MODEL 按网关可用模型调整
 REALTIME_MODEL = os.getenv("REALTIME_MODEL", "grok-voice-think-fast-2.0")
-# 浏览器麦克风原始采样率（AudioContext 实际运行率，前端据此重采样）
-REALTIME_IN_RATE = int(os.getenv("REALTIME_IN_RATE", "48000"))
-# 输出播放采样率（上游 PCM 的采样率，前端据此创建播放缓冲）
+# 上游 pcm16 格式的固定采样率为 24kHz（OpenAI Realtime 标准），
+# 浏览器采集与播放都必须按此率重采样，否则 VAD 与模型听到的音频全部失真
+REALTIME_IN_RATE = int(os.getenv("REALTIME_IN_RATE", "24000"))
 REALTIME_OUT_RATE = int(os.getenv("REALTIME_OUT_RATE", "24000"))

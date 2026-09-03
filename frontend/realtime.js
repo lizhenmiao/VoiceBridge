@@ -18,9 +18,9 @@
   var callTimer = $('callTimer');
   var callCaptions = $('callCaptions');
 
-  var IN_RATE = 16000;   // 会话 config 下发后覆盖
+  var IN_RATE = 24000;   // 会话 config 下发后覆盖（上游 pcm16 固定 24k）
   var OUT_RATE = 24000;
-  var CHUNK_SAMPLES = 3200; // 采集端攒块大小（按 in_rate 计，200ms）
+  var CHUNK_MS = 200;    // 采集攒块时长
 
   var ws = null;
   var audioCtx = null;
@@ -32,6 +32,17 @@
   var timerId = 0;
   var captionUser = null;
   var captionBot = null;
+
+  // 客户端 VAD（网关 server_vad 的自动应答路径有缺陷，改为前端静音检测
+  // + 主动 commit/response.create。静音阈值 350ms：必须抢在网关转写完成
+  // 触发关闭连接之前提交，800ms 会输掉时序）
+  var vad = {
+    speaking: false,
+    lastVoiceAt: 0,
+    noiseFloor: 0.02,   // 自适应噪声底
+    silenceMs: 350,     // 静音超过该时长视为说完
+    awaiting: false     // 已提交 commit+create，等待 response.done
+  };
 
   // ================= 状态 UI =================
 
@@ -199,7 +210,7 @@
       case 'session.created':
       case 'session.updated':
         setOrb('idle');
-        setStatus('正在聆听…');
+        setStatus('请开始说话');
         break;
       case 'input_audio_buffer.speech_started':
         stopPlayback();          // 用户开口 → 立即打断播放
@@ -207,10 +218,9 @@
         setStatus('正在聆听…');
         break;
       case 'input_audio_buffer.speech_stopped':
-        setOrb('thinking');
-        setStatus('思考中…');
-        break;
+        break; // 客户端 VAD 负责断句
       case 'conversation.item.input_audio_transcription.delta':
+      case 'conversation.item.input_audio_transcription_partial':
         appendDelta('user', data.delta || '');
         break;
       case 'conversation.item.input_audio_transcription.completed':
@@ -222,16 +232,33 @@
         setStatus('正在回应…');
         break;
       case 'response.audio_transcript.delta':
+      case 'response.output_audio_transcript.delta':
         appendDelta('bot', data.delta || '');
         break;
       case 'response.audio_transcript.done':
+      case 'response.output_audio_transcript.done':
         if (data.transcript) appendDelta('bot', data.transcript);
         closeCaption('bot');
         break;
+      case 'ping':
+      case 'rate_limits.updated':
+      case 'conversation.created':
+      case 'conversation.item.created':
+      case 'response.content_part.added':
+      case 'response.content_part.done':
+      case 'response.output_item.added':
+      case 'response.output_item.done':
+      case 'response.output_audio.done':
+      case 'response.output_audio_transcript.done':
+        break;
       case 'response.done':
         closeCaption('bot');
+        vad.awaiting = false;
         setOrb('idle');
-        setStatus('正在聆听…');
+        setStatus('请继续说…');
+        break;
+      case 'response.cancelled':
+        vad.awaiting = false;
         break;
     }
   }
@@ -257,11 +284,42 @@
 
       var acc = [];
       var accLen = 0;
+      var chunkLen = Math.round(audioCtx.sampleRate * CHUNK_MS / 1000);
 
       function feed(f32) {
+        // 能量检测（客户端 VAD）
+        var sum = 0;
+        for (var k = 0; k < f32.length; k++) sum += f32[k] * f32[k];
+        var rms = Math.sqrt(sum / f32.length);
+        if (rms < vad.noiseFloor) vad.noiseFloor = vad.noiseFloor * 0.9 + rms * 0.1;
+        var thresh = Math.max(vad.noiseFloor * 2.5, 0.015);
+        var now = Date.now();
+        if (rms > thresh) {
+          vad.lastVoiceAt = now;
+          if (!vad.speaking) {
+            vad.speaking = true;
+            setOrb('listening');
+            setStatus('正在聆听…');
+            stopPlayback(); // 开口即打断回复
+            if (vad.awaiting) {
+              send({ type: 'response.cancel' }); // 打断正在生成的回复
+              vad.awaiting = false;
+            }
+          }
+        } else if (vad.speaking && now - vad.lastVoiceAt > vad.silenceMs) {
+          vad.speaking = false;
+          if (!vad.awaiting) {
+            vad.awaiting = true;
+            send({ type: 'input_audio_buffer.commit' });
+            send({ type: 'response.create' });
+            setOrb('thinking');
+            setStatus('思考中…');
+          }
+        }
+
         acc.push(f32);
         accLen += f32.length;
-        if (accLen < CHUNK_SAMPLES * (audioCtx.sampleRate / IN_RATE) * 0.9) return;
+        if (accLen < chunkLen) return;
         var merged = new Float32Array(accLen);
         var off = 0;
         for (var i = 0; i < acc.length; i++) {
@@ -272,12 +330,9 @@
         accLen = 0;
         if (!active && !busy) return;
         var resampled = resampleLinear(merged, audioCtx.sampleRate, IN_RATE);
-        // 固定按 CHUNK_SAMPLES 切块发送
-        for (var p = 0; p + CHUNK_SAMPLES <= resampled.length; p += CHUNK_SAMPLES) {
-          var slice = resampled.subarray(p, p + CHUNK_SAMPLES);
-          var i16 = floatTo16(slice);
-          if (ws && ws.readyState === 1) ws.send(i16.buffer);
-        }
+        // 每块约 CHUNK_MS 毫秒（按 in_rate 计），上游按字节流拼接无边界要求
+        var i16 = floatTo16(resampled);
+        if (ws && ws.readyState === 1) ws.send(i16.buffer);
       }
 
       if (audioCtx.audioWorklet) {
