@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#f5f5f7">
+  <title>VoiceBridge — 语音对话</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%230071e3'/%3E%3Cpath d='M6 10v4M10 7v10M14 9v6M18 11v2' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css?v=20260903b">
+</head>
+<body>
+  <div class="app">
+
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark"></span>VoiceBridge</div>
+      <div class="status" id="connStatus" data-state="checking">
+        <span class="status-dot"></span><span id="statusText">连接中</span>
+      </div>
+    </header>
+
+    <main class="chat" id="chatList">
+      <div class="welcome" id="welcome">
+        <h1>开口即对话</h1>
+        <p>按住麦克风说话，或直接输入文字。<br>每一条回复都会以语音形式送达。</p>
+        <div class="chips">
+          <button class="chip" type="button" data-text="你好，请用一句话介绍你自己">打个招呼</button>
+          <button class="chip" type="button" data-text="你能帮我做哪些事情？">看看你能做什么</button>
+          <button class="chip" type="button" data-text="给我讲一个冷笑话">讲个笑话</button>
+        </div>
+      </div>
+    </main>
+
+    <footer class="inputbar">
+      <div class="inputbar-inner">
+        <div class="input-wrap" id="inputWrap">
+          <textarea id="textInput" rows="1" placeholder="输入消息" autocomplete="off"></textarea>
+        </div>
+        <div class="rec-wrap hidden" id="recWrap">
+          <span class="rec-dot"></span>
+          <span class="rec-time" id="recTime">0:00</span>
+          <span class="rec-wave"><i></i><i></i><i></i><i></i><i></i></span>
+          <span class="rec-hint">正在聆听 · 点击右侧结束</span>
+        </div>
+        <button id="actionBtn" class="action-btn mode-mic" type="button" aria-label="录音">
+          <svg class="icon icon-mic" viewBox="0 0 24 24" fill="currentColor"><path d="M12 14.5a3.2 3.2 0 0 0 3.2-3.2V6.2a3.2 3.2 0 1 0-6.4 0v5.1A3.2 3.2 0 0 0 12 14.5z"/><path d="M17.6 11.2a.9.9 0 0 0-1.8 0 3.8 3.8 0 0 1-7.6 0 .9.9 0 0 0-1.8 0 5.6 5.6 0 0 0 4.7 5.5v1.9h-1.6a.9.9 0 0 0 0 1.8h5a.9.9 0 0 0 0-1.8h-1.6v-1.9a5.6 5.6 0 0 0 5.1-5.5z"/></svg>
+          <svg class="icon icon-send" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5.2c.24 0 .47.09.65.27l5.6 5.6a.9.9 0 1 1-1.27 1.27L12.9 8.17V18a.9.9 0 0 1-1.8 0V8.17l-4.08 4.17a.9.9 0 1 1-1.27-1.27l5.6-5.6A.9.9 0 0 1 12 5.2z"/></svg>
+          <svg class="icon icon-stop" viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="2.5"/></svg>
+        </button>
+      </div>
+    </footer>
+
+    <div id="toast" class="toast hidden"></div>
+  </div>
+
+  <script src="app.js?v=20260903b"></script>
+</body>
+</html>

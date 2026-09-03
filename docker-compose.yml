@@ -1,0 +1,44 @@
+# VoiceBridge 部署编排（模板文件）
+#
+# 所有运行参数（key、base_url、模型名、限制）都在 .env 文件中管理：
+#   cp .env.example .env && 编辑 .env 填入真实值
+# docker compose 会自动读取项目根目录的 .env 做 ${VAR} 变量替换。
+
+services:
+  voicebridge:
+    build: .
+    image: voicebridge:latest
+    container_name: voicebridge
+    ports:
+      - "6700:6700"
+    volumes:
+      # 临时文件（请求结束即删；SAVE_DEBUG_AUDIO=1 时中间产物落 tmp/debug）
+      - ./tmp:/app/tmp
+    environment:
+      # ---- 语音引擎（OpenAI 兼容：grok-stt + grok-voice）----
+      VOICE_API_BASE_URL: ${VOICE_API_BASE_URL}
+      VOICE_API_KEY: ${VOICE_API_KEY}
+      STT_MODEL: ${STT_MODEL}
+      STT_LANGUAGE: ${STT_LANGUAGE}
+      TTS_MODEL: ${TTS_MODEL}
+      TTS_VOICE: ${TTS_VOICE}
+      TTS_LANGUAGE: ${TTS_LANGUAGE}
+      # ---- 大模型（OpenAI 兼容 /chat/completions）----
+      LLM_BASE_URL: ${LLM_BASE_URL}
+      LLM_KEY: ${LLM_KEY}
+      LLM_MODEL: ${LLM_MODEL}
+      # ---- 限制 ----
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB}
+      MAX_RECORD_SECONDS: ${MAX_RECORD_SECONDS}
+      MAX_TTS_CHARS: ${MAX_TTS_CHARS}
+      # ---- 行为开关 ----
+      SAVE_DEBUG_AUDIO: "0"
+      ASR_ENABLED: "1"
+    restart: unless-stopped
+    healthcheck:
+      # 用 python 标准库探测，镜像内无需安装 curl
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:6700/api/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s

@@ -1,0 +1,6 @@
+# FastAPI 服务框架
+# uvicorn 不带 [standard]：省去 uvloop/httptools/websockets 等本服务用不到的组件
+fastapi==0.115.6
+uvicorn==0.34.0
+python-multipart==0.0.20
+requests>=2.31

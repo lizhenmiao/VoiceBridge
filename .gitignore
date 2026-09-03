@@ -1,0 +1,18 @@
+# 运行密钥（绝不入库）
+.env
+
+# 临时文件
+tmp/
+!tmp/.gitkeep
+
+# 本地模型缓存（云端版已不需要）
+models/
+
+# Python
+__pycache__/
+*.pyc
+
+# 编辑器/系统
+.vscode/
+.idea/
+Thumbs.db

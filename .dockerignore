@@ -1,0 +1,9 @@
+# 不把本机模型缓存/临时文件打进镜像
+models/
+tmp/
+**/__pycache__/
+**/*.pyc
+.git/
+.gitignore
+README.md
+*.md
