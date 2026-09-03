@@ -21,7 +21,7 @@ import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -35,7 +35,13 @@ from config import (
     MAX_RECORD_SECONDS,
     MAX_TTS_CHARS,
     MAX_UPLOAD_MB,
+    REALTIME_IN_RATE,
+    REALTIME_MODEL,
+    REALTIME_OUT_RATE,
+    VOICE_API_BASE_URL,
+    VOICE_API_KEY,
 )
+from realtime import realtime_proxy
 from tts import TTSService
 
 logging.basicConfig(
@@ -98,6 +104,12 @@ async def health():
         "asr": asr_state,
         "tts": tts_state,
         "chat": {"llm_configured": chat_service.configured, "model": chat_service.model},
+        "realtime": {
+            "enabled": bool(VOICE_API_BASE_URL and VOICE_API_KEY),
+            "model": REALTIME_MODEL,
+            "in_rate": REALTIME_IN_RATE,
+            "out_rate": REALTIME_OUT_RATE,
+        },
         "ffmpeg": ffmpeg_ok,
         "limits": {
             "max_upload_mb": MAX_UPLOAD_MB,
@@ -105,6 +117,12 @@ async def health():
             "max_tts_chars": MAX_TTS_CHARS,
         },
     }
+
+
+@app.websocket("/ws/realtime")
+async def ws_realtime(browser_ws: WebSocket):
+    """实时通话代理：浏览器事件/音频 ↔ 上游 Realtime WS（key 由服务端代持）。"""
+    await realtime_proxy(browser_ws)
 
 
 async def _transcribe_upload(file: UploadFile) -> tuple[str, float]:

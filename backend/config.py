@@ -36,3 +36,11 @@ TTS_LANGUAGE = os.getenv("TTS_LANGUAGE", "zh")
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "").rstrip("/")
 LLM_KEY = os.getenv("LLM_KEY", "").strip()
 LLM_MODEL = os.getenv("LLM_MODEL", "grok-chat-fast")  # 按网关实际可用模型名调整
+
+# ---- 实时通话（OpenAI Realtime 兼容 WebSocket 代理）----
+# 复用 VOICE_API_BASE_URL / VOICE_API_KEY；REALTIME_MODEL 按网关可用模型调整
+REALTIME_MODEL = os.getenv("REALTIME_MODEL", "grok-voice-think-fast-2.0")
+# 浏览器麦克风原始采样率（AudioContext 实际运行率，前端据此重采样）
+REALTIME_IN_RATE = int(os.getenv("REALTIME_IN_RATE", "48000"))
+# 输出播放采样率（上游 PCM 的采样率，前端据此创建播放缓冲）
+REALTIME_OUT_RATE = int(os.getenv("REALTIME_OUT_RATE", "24000"))

@@ -1,9 +1,10 @@
 # VoiceBridge（声桥）
 
-微信风格的中文语音对话助手 H5：**按住说话 → 云端 grok-stt 识别 → 大模型回复 → grok-voice 合成 → 语音条卡片点击播放**。
+微信风格的中文语音对话助手 H5：**按住说话 → 云端 grok-stt 识别 → 大模型回复 → grok-voice 合成 → 语音条卡片点击播放**，另支持**实时通话模式**（Realtime WebSocket 双工语音 + 实时字幕 + 可打断）。
 
 - **语音输入（ASR）**：`grok-stt`（OpenAI 兼容 `/v1/audio/transcriptions`）
 - **语音输出（TTS）**：`grok-voice-think-fast-2.0`（OpenAI 兼容 `/v1/audio/speech`）
+- **实时通话**：`/ws/realtime` WebSocket 代理 → 上游 Realtime（服务端 VAD 断句）
 - **大模型（可选）**：OpenAI 兼容 `/v1/chat/completions`；未配置 `LLM_KEY` 时返回本地演示回复
 - **音频**：上传音频由后端 ffmpeg 统一转 **16kHz / 单声道 / PCM 16-bit wav** 后再送云端
 - **前端**：原生 HTML/JS，按住说话（上滑取消）、语音条卡片点击播放，兼容 Chrome / Edge / Firefox / iOS Safari 14.3+ / 微信内置浏览器
@@ -56,7 +57,9 @@ docker compose up -d --build
 | `STT_LANGUAGE` / `TTS_LANGUAGE` | `zh` | 语言代码 |
 | `LLM_KEY` | 空 | 大模型 key；留空 = 本地演示回复 |
 | `LLM_BASE_URL` | 同语音接口 | `/chat/completions` 地址 |
-| `LLM_MODEL` | `grok-4-fast` | 对话模型名（按中转站实际可用调整） |
+| `LLM_MODEL` | `grok-chat-fast` | 对话模型名（按中转站实际可用调整） |
+| `REALTIME_MODEL` | `grok-voice-think-fast-2.0` | 实时通话模型（复用语音接口的 BASE_URL/KEY） |
+| `REALTIME_IN_RATE` / `REALTIME_OUT_RATE` | `48000` / `24000` | 实时通话上行采集率 / 下行播放率（Hz） |
 | `MAX_UPLOAD_MB` | `20` | 上传音频大小上限 |
 | `MAX_RECORD_SECONDS` | `60` | 录音时长上限 |
 | `MAX_TTS_CHARS` | `500` | 合成文本长度上限 |
@@ -88,6 +91,16 @@ docker compose up -d --build
 ### `POST /api/tts` — 语音合成
 
 `{"text": "..."}`（≤500 字），返回 `audio/wav`（16kHz/mono/PCM16）。
+
+### `GET /ws/realtime` — 实时通话（WebSocket）
+
+浏览器 → 本服务 → 上游 Realtime 的双向代理（浏览器 WS 无法携带鉴权头，key 由后端代持）。
+
+- 音频：上行二进制 PCM16（浏览器按 `session.config` 里的 `in_rate` 重采样）；下行 `response.*audio*.delta` 解码为二进制 PCM16（按 `out_rate` 播放）
+- 事件：OpenAI Realtime 兼容 JSON（`session.created/updated`、`input_audio_buffer.speech_started/stopped`、`response.audio_transcript.delta/done`、`error`…），其余原样透传
+- 建立：连接后先收到 `session.config`（含 in_rate/out_rate/model），随后自动注入 `session.update`（voice / server_vad / 转写配置）
+
+> 注意：实时通话要求网关的 Realtime WebSocket 通道可用。若网关对所有标准握手返回 400「请求不是有效的 WebSocket Upgrade」，属网关侧问题，本功能的代理与前端已就绪，网关修复后即可使用。
 
 ### `GET /api/health`
 

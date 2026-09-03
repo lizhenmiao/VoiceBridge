@@ -4,3 +4,5 @@ fastapi==0.115.6
 uvicorn==0.34.0
 python-multipart==0.0.20
 requests>=2.31
+# 实时通话：FastAPI WebSocket + 上游 WS 客户端
+websockets>=13,<15

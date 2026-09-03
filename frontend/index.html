@@ -7,7 +7,7 @@
   <meta name="theme-color" content="#f5f5f7">
   <title>VoiceBridge — 语音对话</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%230071e3'/%3E%3Cpath d='M6 10v4M10 7v10M14 9v6M18 11v2' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="style.css?v=20260903b">
+  <link rel="stylesheet" href="style.css?v=20260904a">
 </head>
 <body>
   <div class="app">
@@ -33,6 +33,9 @@
 
     <footer class="inputbar">
       <div class="inputbar-inner">
+        <button id="btnCall" class="call-entry" type="button" aria-label="实时通话" title="实时通话">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6.62 10.79a15.05 15.05 0 0 0 6.59 6.59l2.2-2.2a1 1 0 0 1 1.02-.24 11.36 11.36 0 0 0 3.57.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1 11.36 11.36 0 0 0 .57 3.57 1 1 0 0 1-.25 1.02l-2.2 2.2z"/></svg>
+        </button>
         <div class="input-wrap" id="inputWrap">
           <textarea id="textInput" rows="1" placeholder="输入消息" autocomplete="off"></textarea>
         </div>
@@ -53,6 +56,26 @@
     <div id="toast" class="toast hidden"></div>
   </div>
 
-  <script src="app.js?v=20260903b"></script>
+  <!-- 实时通话全屏层 -->
+  <div id="callOverlay" class="call-overlay hidden">
+    <div class="call-top">
+      <button id="btnCallClose" class="call-back" type="button">‹ 返回</button>
+      <span id="callTimer" class="call-timer"></span>
+    </div>
+    <div class="call-stage">
+      <div id="callOrb" class="orb idle"></div>
+      <div id="callStatus" class="call-status">准备就绪</div>
+    </div>
+    <div id="callCaptions" class="call-captions"></div>
+    <div class="call-controls">
+      <button id="btnCallAction" class="call-main" type="button" aria-label="开始通话">
+        <svg class="i-start" viewBox="0 0 24 24" fill="currentColor"><path d="M6.62 10.79a15.05 15.05 0 0 0 6.59 6.59l2.2-2.2a1 1 0 0 1 1.02-.24 11.36 11.36 0 0 0 3.57.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1 11.36 11.36 0 0 0 .57 3.57 1 1 0 0 1-.25 1.02l-2.2 2.2z"/></svg>
+        <svg class="i-end" viewBox="0 0 24 24" fill="currentColor"><path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.29-.7.29-.28 0-.53-.11-.71-.29L.29 13.08c-.18-.17-.29-.43-.29-.7 0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.67c.18.18.29.43.29.71 0 .27-.11.53-.29.7l-2.48 2.48c-.18.18-.43.29-.71.29-.27 0-.52-.11-.7-.28a11.26 11.26 0 0 0-2.67-1.86 1 1 0 0 1-.55-.9v-3.1C15.15 9.25 13.6 9 12 9z"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <script src="app.js?v=20260904a"></script>
+  <script src="realtime.js?v=20260904a"></script>
 </body>
 </html>
