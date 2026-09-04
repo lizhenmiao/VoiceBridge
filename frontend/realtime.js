@@ -66,21 +66,31 @@
   }
 
   // ================= 字幕 =================
+  // 上游转写是"渐进式"的：同一 item 会多次 updated/completed，网关还可能
+  // 重放 delta。因此按 item_id 建卡、每次整体替换文本（以最新为准），
+  // 不做字符串追加，避免同一句话重复多张卡或重复拼贴。
 
-  function appendDelta(kind, text) {
+  var captionItems = {};  // item_id -> {el}
+  var botAcc = {};        // item_id -> 已累计的 bot delta 文本
+
+  function upsertCaption(role, itemId, text) {
     if (!text) return;
-    var el = kind === 'user' ? captionUser : captionBot;
-    if (!el) {
-      el = document.createElement('div');
-      el.className = 'cap ' + (kind === 'user' ? 'cap-user' : 'cap-bot');
+    var key = itemId || ('_anon_' + role);
+    var entry = captionItems[key];
+    if (!entry) {
+      var el = document.createElement('div');
+      el.className = 'cap ' + (role === 'user' ? 'cap-user' : 'cap-bot');
       callCaptions.appendChild(el);
-      if (kind === 'user') captionUser = el; else captionBot = el;
+      entry = captionItems[key] = { el: el };
+      // 只保留最近 12 张字幕卡
+      var keys = Object.keys(captionItems);
+      if (keys.length > 12) {
+        captionItems[keys[0]].el.remove();
+        delete captionItems[keys[0]];
+      }
     }
-    el.textContent += text;
+    entry.el.textContent = text;
     callCaptions.scrollTop = callCaptions.scrollHeight;
-  }
-  function closeCaption(kind) {
-    if (kind === 'user') captionUser = null; else captionBot = null;
   }
 
   // ================= 入口 / 生命周期 =================
@@ -224,11 +234,13 @@
         break; // 客户端 VAD 负责断句
       case 'conversation.item.input_audio_transcription.delta':
       case 'conversation.item.input_audio_transcription_partial':
-        appendDelta('user', data.delta || '');
+      case 'conversation.item.input_audio_transcription.updated':
+        // 部分/增量转写：同一 item 整体刷新
+        upsertCaption('user', data.item_id, data.transcript || data.delta || '');
         break;
       case 'conversation.item.input_audio_transcription.completed':
-        appendDelta('user', data.transcript || '');
-        closeCaption('user');
+        // 终稿（可能多次触发）：覆盖为最终文本
+        upsertCaption('user', data.item_id, data.transcript || '');
         break;
       case 'response.created':
         setOrb('speaking');
@@ -236,12 +248,17 @@
         break;
       case 'response.audio_transcript.delta':
       case 'response.output_audio_transcript.delta':
-        appendDelta('bot', data.delta || '');
+        // bot 的 delta 是纯增量，累计到该 item；done 事件会整体覆盖，不重复拼
+        var bKey = data.item_id || '_bot';
+        botAcc[bKey] = (botAcc[bKey] || '') + (data.delta || '');
+        upsertCaption('bot', data.item_id, botAcc[bKey]);
         break;
       case 'response.audio_transcript.done':
       case 'response.output_audio_transcript.done':
-        if (data.transcript) appendDelta('bot', data.transcript);
-        closeCaption('bot');
+        if (data.transcript !== undefined) {
+          upsertCaption('bot', data.item_id, data.transcript);
+          delete botAcc[data.item_id || '_bot'];
+        }
         break;
       case 'ping':
       case 'rate_limits.updated':
@@ -255,7 +272,6 @@
       case 'response.output_audio_transcript.done':
         break;
       case 'response.done':
-        closeCaption('bot');
         vad.awaiting = false;
         clearTimeout(awaitTimer);
         setOrb('idle');
