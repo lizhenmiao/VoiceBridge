@@ -30,8 +30,6 @@
   var active = false;       // 通话中（含连接中）
   var busy = false;         // 正在握手
   var timerId = 0;
-  var captionUser = null;
-  var captionBot = null;
   var awaitTimer = 0;
 
   // 客户端 VAD（网关 server_vad 的自动应答路径有缺陷，改为前端静音检测
@@ -61,8 +59,8 @@
 
   function clearCaptions() {
     callCaptions.innerHTML = '';
-    captionUser = null;
-    captionBot = null;
+    captionItems = {};
+    botAcc = {};
   }
 
   // ================= 字幕 =================
