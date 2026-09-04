@@ -108,13 +108,14 @@
 
     setupAudio()
       .then(function () {
+        // 音频就绪后再连 WS，握手成功即刻置 active，避免竞态丢块
         return connectWS();
       })
       .then(function () {
         busy = false;
         active = true;
         setOrb('idle');
-        setStatus('正在聆听…');
+        setStatus('请开始说话');
         startTimer();
       })
       .catch(function (err) {
@@ -278,6 +279,11 @@
       micStream = stream;
       // 采集 context 不指定采样率（跟随设备），由 resampleLinear 统一到 IN_RATE
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      // Chrome 的 AudioContext 可能以 suspended 状态启动（自动播放策略），
+      // 不 resume 的话 onaudioprocess / worklet 永远不产出数据 → 音频块=0
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume().catch(function () {});
+      }
       var source = audioCtx.createMediaStreamSource(stream);
 
       // 静音输出节点：维持处理图活跃但零输出（不产生啸叫），Safari 兼容
@@ -288,6 +294,9 @@
       var acc = [];
       var accLen = 0;
       var chunkLen = Math.round(audioCtx.sampleRate * CHUNK_MS / 1000);
+      var sendCount = 0;      // 已发送块数（前端自检 + 日志对照）
+      var dropCount = 0;      // 因未激活被丢弃的块数
+      var lastVadLog = 0;     // VAD 状态变化日志节流
 
       function feed(f32) {
         // 能量检测（客户端 VAD）
@@ -340,11 +349,23 @@
         }
         acc = [];
         accLen = 0;
-        if (!active && !busy) return;
+        // 会话未就绪时丢弃（正常：握手需要约 1s，期间的块无法发送）
+        if (!active || !ws || ws.readyState !== 1) {
+          dropCount += 1;
+          return;
+        }
         var resampled = resampleLinear(merged, audioCtx.sampleRate, IN_RATE);
-        // 每块约 CHUNK_MS 毫秒（按 in_rate 计），上游按字节流拼接无边界要求
         var i16 = floatTo16(resampled);
-        if (ws && ws.readyState === 1) ws.send(i16.buffer);
+        try {
+          ws.send(i16.buffer);
+          sendCount += 1;
+          // 心跳：首次发送与每 50 块（10 秒）打一次状态，帮助自检
+          if (sendCount === 1 || sendCount % 50 === 0) {
+            setStatus('已发送 ' + sendCount + ' 块 · ' + (vad.speaking ? '聆听中' : '待机'));
+          }
+        } catch (e) {
+          /* 连接刚断开时的竞态，忽略 */
+        }
       }
 
       if (audioCtx.audioWorklet) {

@@ -116,15 +116,30 @@ async def realtime_proxy(browser_ws: WebSocket) -> None:
     except Exception as exc:  # noqa: BLE001
         logger.warning("session.update 发送失败：%s", exc)
 
-    # 4) 双向泵
+    # 4) 双向泵（带统计日志，便于定位实时链路问题）
+    stats = {
+        "appends": 0, "append_bytes": 0, "client": {},
+        "up_events": {}, "audio_frames": 0, "audio_bytes": 0,
+    }
+
     async def browser_to_upstream():
         while True:
             msg = await browser_ws.receive()
             if msg["type"] == "websocket.disconnect":
+                logger.info("[RT] 浏览器侧断开")
                 break
             if msg.get("text") is not None:
+                try:
+                    t = json.loads(msg["text"]).get("type", "?")
+                    stats["client"][t] = stats["client"].get(t, 0) + 1
+                    if t in ("input_audio_buffer.commit", "response.create", "response.cancel"):
+                        logger.info("[浏览器→上游] 控制事件: %s", t)
+                except ValueError:
+                    pass
                 await upstream.send(msg["text"])
             elif msg.get("bytes") is not None:
+                stats["appends"] += 1
+                stats["append_bytes"] += len(msg["bytes"])
                 event = {
                     "type": "input_audio_buffer.append",
                     "audio": base64.b64encode(msg["bytes"]).decode("ascii"),
@@ -132,12 +147,7 @@ async def realtime_proxy(browser_ws: WebSocket) -> None:
                 await upstream.send(json.dumps(event))
 
     async def upstream_to_browser():
-        """上游 → 浏览器转发。
-
-        断句与应答触发全部由前端客户端 VAD 负责（静音 350ms 后
-        commit + response.create，见 frontend/realtime.js），本层只做
-        纯透传 + 音频增量解码，不注入任何控制事件。
-        """
+        last_type = ""
         async for raw in upstream:
             text = raw if isinstance(raw, str) else raw.decode("utf-8", "replace")
             try:
@@ -148,10 +158,21 @@ async def realtime_proxy(browser_ws: WebSocket) -> None:
             etype = event.get("type", "")
             delta = event.get("delta")
 
+            if etype != "ping" and etype != last_type:
+                logger.info("[上游→浏览器] %s", etype)
+                last_type = etype
+            stats["up_events"][etype] = stats["up_events"].get(etype, 0) + 1
+
             # 音频增量 → 解码为二进制 PCM 帧给浏览器
             if isinstance(delta, str) and delta and "audio" in etype and "transcript" not in etype:
+                stats["audio_frames"] += 1
+                stats["audio_bytes"] += len(delta) * 3 // 4
                 await browser_ws.send_bytes(base64.b64decode(delta))
                 continue
+
+            if etype == "conversation.item.input_audio_transcription.completed":
+                logger.info("[上游→浏览器] 用户语音识别: %s", (event.get("transcript") or "")[:60])
+
             await browser_ws.send_text(json.dumps(event, ensure_ascii=False))
 
     browser_task = asyncio.create_task(browser_to_upstream())
@@ -175,4 +196,10 @@ async def realtime_proxy(browser_ws: WebSocket) -> None:
         await browser_ws.close()
     except Exception:  # noqa: BLE001
         pass
+    logger.info(
+        "[RT] 会话结束统计: 浏览器→上游 音频块=%d(%.1fs@24k) 控制事件=%s | "
+        "上游→浏览器 事件=%s 回复音频=%d帧(%.1fs)",
+        stats["appends"], stats["append_bytes"] / 2 / 24000, stats["client"],
+        stats["up_events"], stats["audio_frames"], stats["audio_bytes"] / 2 / 24000,
+    )
     logger.info("实时通话结束")
