@@ -32,6 +32,7 @@
   var timerId = 0;
   var captionUser = null;
   var captionBot = null;
+  var awaitTimer = 0;
 
   // 客户端 VAD（网关 server_vad 的自动应答路径有缺陷，改为前端静音检测
   // + 主动 commit/response.create。静音阈值 350ms：必须抢在网关转写完成
@@ -254,11 +255,13 @@
       case 'response.done':
         closeCaption('bot');
         vad.awaiting = false;
+        clearTimeout(awaitTimer);
         setOrb('idle');
         setStatus('请继续说…');
         break;
       case 'response.cancelled':
         vad.awaiting = false;
+        clearTimeout(awaitTimer);
         break;
     }
   }
@@ -314,6 +317,15 @@
             send({ type: 'response.create' });
             setOrb('thinking');
             setStatus('思考中…');
+            // 看门狗：上游迟迟不回 response.done 时解除等待，避免卡死
+            clearTimeout(awaitTimer);
+            awaitTimer = setTimeout(function () {
+              if (vad.awaiting) {
+                vad.awaiting = false;
+                setOrb('idle');
+                setStatus('响应超时，请再说一次');
+              }
+            }, 20000);
           }
         }
 

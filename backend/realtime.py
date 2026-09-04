@@ -117,8 +117,6 @@ async def realtime_proxy(browser_ws: WebSocket) -> None:
         logger.warning("session.update 发送失败：%s", exc)
 
     # 4) 双向泵
-    upstream_closed = asyncio.Event()
-
     async def browser_to_upstream():
         while True:
             msg = await browser_ws.receive()
@@ -134,17 +132,12 @@ async def realtime_proxy(browser_ws: WebSocket) -> None:
                 await upstream.send(json.dumps(event))
 
     async def upstream_to_browser():
-        """上游 → 浏览器转发，并修补网关的已知缺陷：
+        """上游 → 浏览器转发。
 
-        网关的 server_vad「识别完成 → 自动应答」路径存在缺陷（转写完成后
-        直接关闭连接、不出回复音频）。因此这里把上游的 server_vad 当作
-        纯检测器使用：speech_started/stopped 原样转发给前端做状态展示，
-        当检测到"一轮语音结束"后，由代理主动补发 commit + response.create
-        走已验证可用的手动应答路径。
+        断句与应答触发全部由前端客户端 VAD 负责（静音 350ms 后
+        commit + response.create，见 frontend/realtime.js），本层只做
+        纯透传 + 音频增量解码，不注入任何控制事件。
         """
-        speech_active = False
-        last_speech_ts = 0.0
-
         async for raw in upstream:
             text = raw if isinstance(raw, str) else raw.decode("utf-8", "replace")
             try:
@@ -159,25 +152,6 @@ async def realtime_proxy(browser_ws: WebSocket) -> None:
             if isinstance(delta, str) and delta and "audio" in etype and "transcript" not in etype:
                 await browser_ws.send_bytes(base64.b64decode(delta))
                 continue
-
-            # 记录语音起止时刻
-            if etype == "input_audio_buffer.speech_started":
-                speech_active = True
-                last_speech_ts = asyncio.get_event_loop().time()
-            elif etype == "input_audio_buffer.speech_stopped":
-                speech_active = False
-                last_speech_ts = asyncio.get_event_loop().time()
-
-            # 转写完成 = 这句话在上游已经收完了，立即补 commit + create
-            # （网关此时会关连接，必须抢在它之前）
-            if etype == "conversation.item.input_audio_transcription.completed":
-                try:
-                    await upstream.send(json.dumps({"type": "input_audio_buffer.commit"}))
-                    await upstream.send(json.dumps({"type": "response.create"}))
-                    logger.info("已为 VAD 语音补发 commit + response.create")
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("补发应答失败：%s", exc)
-
             await browser_ws.send_text(json.dumps(event, ensure_ascii=False))
 
     browser_task = asyncio.create_task(browser_to_upstream())

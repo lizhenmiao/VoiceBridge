@@ -35,6 +35,8 @@ services:
       SAVE_DEBUG_AUDIO: "0"
       ASR_ENABLED: "1"
     restart: unless-stopped
+    # tini 初始化进程：回收 WS 子进程产生的僵尸，避免容器无法停止/重建
+    init: true
     healthcheck:
       # 用 python 标准库探测，镜像内无需安装 curl
       test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:6700/api/health', timeout=5)"]
