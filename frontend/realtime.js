@@ -39,8 +39,11 @@
     speaking: false,
     lastVoiceAt: 0,
     noiseFloor: 0.02,   // 自适应噪声底
-    silenceMs: 350,     // 静音超过该时长视为说完
-    awaiting: false     // 已提交 commit+create，等待 response.done
+    voiceStreak: 0,     // 连续超阈值块数（起音判定用，防吸气/碰麦误触发）
+    silenceMs: 600,     // 静音超过该时长视为说完
+    awaiting: false,    // 已提交 commit+create，等待 response.done
+    playing: false,     // 回复音频播放中（打断判定用）
+    lastCommitAt: 0     // 上次提交时刻（提交后短暂屏蔽起音判定）
   };
 
   // ================= 状态 UI =================
@@ -272,6 +275,10 @@
       case 'response.done':
         vad.awaiting = false;
         clearTimeout(awaitTimer);
+        // 音频播完或排队播完后复位播放标记（延迟等队列排空）
+        setTimeout(function () {
+          if (!playQueue.length) vad.playing = false;
+        }, 800);
         setOrb('idle');
         setStatus('请继续说…');
         break;
@@ -323,33 +330,41 @@
         var now = Date.now();
         if (rms > thresh) {
           vad.lastVoiceAt = now;
-          if (!vad.speaking) {
+          vad.voiceStreak += 1;
+          // 起音判定：连续 2 块超阈值才算开口（防吸气/短促噪声误触发）；
+          // 刚提交应答后 1.2s 内屏蔽新起音（等回复开始，避免自我打断）
+          if (!vad.speaking && vad.voiceStreak >= 2 &&
+              now - vad.lastCommitAt > 1200) {
             vad.speaking = true;
             setOrb('listening');
             setStatus('正在聆听…');
-            stopPlayback(); // 开口即打断回复
-            if (vad.awaiting) {
-              send({ type: 'response.cancel' }); // 打断正在生成的回复
-              vad.awaiting = false;
+            // 仅在确实播放回复时才需要 cancel，避免 "no active response" 报错
+            if (vad.playing) {
+              send({ type: 'response.cancel' });
+              stopPlayback();
             }
           }
-        } else if (vad.speaking && now - vad.lastVoiceAt > vad.silenceMs) {
-          vad.speaking = false;
-          if (!vad.awaiting) {
-            vad.awaiting = true;
-            send({ type: 'input_audio_buffer.commit' });
-            send({ type: 'response.create' });
-            setOrb('thinking');
-            setStatus('思考中…');
-            // 看门狗：上游迟迟不回 response.done 时解除等待，避免卡死
-            clearTimeout(awaitTimer);
-            awaitTimer = setTimeout(function () {
-              if (vad.awaiting) {
-                vad.awaiting = false;
-                setOrb('idle');
-                setStatus('响应超时，请再说一次');
-              }
-            }, 20000);
+        } else {
+          vad.voiceStreak = 0;
+          if (vad.speaking && now - vad.lastVoiceAt > vad.silenceMs) {
+            vad.speaking = false;
+            if (!vad.awaiting) {
+              vad.awaiting = true;
+              vad.lastCommitAt = now;
+              send({ type: 'input_audio_buffer.commit' });
+              send({ type: 'response.create' });
+              setOrb('thinking');
+              setStatus('思考中…');
+              // 看门狗：上游迟迟不回 response.done 时解除等待，避免卡死
+              clearTimeout(awaitTimer);
+              awaitTimer = setTimeout(function () {
+                if (vad.awaiting) {
+                  vad.awaiting = false;
+                  setOrb('idle');
+                  setStatus('响应超时，请再说一次');
+                }
+              }, 20000);
+            }
           }
         }
 
@@ -463,6 +478,7 @@
 
   function onAudioChunk(bytes) {
     // 上游 PCM（out_rate）；Web Audio 会自动把 AudioBuffer 重采样到 context 率
+    vad.playing = true;
     playQueue.push(bytes);
     drain();
   }
@@ -499,6 +515,7 @@
     });
     scheduled = [];
     nextAt = 0;
+    vad.playing = false;
   }
 
   window.addEventListener('beforeunload', function () {
