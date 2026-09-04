@@ -111,7 +111,8 @@
         // 音频就绪后再连 WS，握手成功即刻置 active，避免竞态丢块
         return connectWS();
       })
-      .then(function () {
+      .then(function (socket) {
+        ws = socket; // 关键：绑定全局 ws，否则 send() 全部空转、音频不发
         busy = false;
         active = true;
         setOrb('idle');
